@@ -510,7 +510,32 @@ def do_install(identifier: str, category: str = "", force: bool = False,
 
     c.print(f"\n[bold]Fetching:[/] {identifier}")
 
-    meta, bundle, _matched_source = _resolve_source_meta_and_bundle(identifier, sources)
+    # Background heartbeat — same pattern as do_inspect
+    import threading, time
+    _stop = threading.Event()
+    _start = time.monotonic()
+    BASE = [5, 15, 30, 60]
+    def _heartbeat():
+        idx = 0
+        while True:
+            target = BASE[idx] if idx < len(BASE) else BASE[-1] + 30 * (idx - len(BASE) + 1)
+            remaining = target - (time.monotonic() - _start)
+            if remaining > 0 and _stop.wait(remaining):
+                break
+            elapsed = time.monotonic() - _start
+            print(
+                f"  Fetching skill... ({elapsed:.0f}s elapsed, "
+                f"Ctrl+C to cancel)",
+                file=sys.stderr, flush=True,
+            )
+            idx += 1
+    t = threading.Thread(target=_heartbeat, daemon=True)
+    t.start()
+
+    try:
+        meta, bundle, _matched_source = _resolve_source_meta_and_bundle(identifier, sources)
+    finally:
+        _stop.set()
 
     if not bundle:
         # Check if any source hit GitHub API rate limit
