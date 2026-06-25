@@ -2282,3 +2282,49 @@ class TestParallelSearchSourcesTimeout:
         assert source_counts.get("a") == 1
         assert source_counts.get("b") == 1
         assert len(all_results) == 2
+
+
+class TestGitHubSourceGetRepoTree:
+    def _make_source(self) -> GitHubSource:
+        auth = MagicMock(spec=GitHubAuth)
+        auth.get_headers.return_value = {"Authorization": "token test"}
+        return GitHubSource(auth=auth)
+
+    def test_transport_failure_returns_none(self):
+        src = self._make_source()
+        src._github_get = MagicMock(return_value=None)
+        result = src._get_repo_tree("owner/repo")
+        assert result is None
+        src._github_get.assert_called()
+
+    def test_non_200_returns_none(self):
+        resp_404 = MagicMock(spec=httpx.Response)
+        resp_404.status_code = 404
+        src = self._make_source()
+        src._github_get = MagicMock(return_value=resp_404)
+        result = src._get_repo_tree("owner/repo")
+        assert result is None
+
+    def test_ok_response_returns_tree(self):
+        def _github_get_side_effect(url, **kw):
+            if "git/trees" in url:
+                resp = MagicMock(spec=httpx.Response)
+                resp.status_code = 200
+                resp.json.return_value = {
+                    "tree": [{"path": "skills/find-skills/SKILL.md", "type": "blob"}],
+                    "truncated": False,
+                }
+                return resp
+            resp = MagicMock(spec=httpx.Response)
+            resp.status_code = 200
+            resp.json.return_value = {"default_branch": "main"}
+            return resp
+
+        src = self._make_source()
+        src._github_get = MagicMock(side_effect=_github_get_side_effect)
+        result = src._get_repo_tree("owner/repo")
+        assert result is not None
+        branch, entries = result
+        assert branch == "main"
+        assert len(entries) == 1
+        assert entries[0]["path"] == "skills/find-skills/SKILL.md"
